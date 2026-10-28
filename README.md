@@ -17,7 +17,8 @@ BOSS 技能预警插件：读战斗日志与光环事件，提前提示技能、
 1. 解压后目录名必须是 **`BigWigs`**（与 `BigWigs.toc` 同级）
 2. 整个目录放进 `Interface\AddOns\`
 3. **需要公共库 `!Libs`**：Ace2、Babble-2.2、TabletLib、SurfaceLib、DewdropLib、CandyBar 等。
-   本仓库**不含**这些库
+   本仓库**不含**这些库，配套打包好的版本见 [tian880212/Libs](https://github.com/tian880212/Libs)
+   （解压后目录名必须带感叹号：`!Libs`）
 4. 进游戏 `/bw` 打开设置
 
 ## 常用命令
@@ -42,12 +43,15 @@ BOSS 技能预警插件：读战斗日志与光环事件，提前提示技能、
 - `Raids/TMH/Trioch.lua` — **提里奥克**（Trioch the Devourer）
 - `Raids/TMH/Rotgrowl.lua` — **腐嚎**（Rotgrowl，小怪「蠕动的异质」相关机制）
 
-### ⚠️ 这两个 BOSS 的中文名需要额外补词条
+### ⚠️ 这两个 BOSS 的中文名来自 `!Libs`
 
 BigWigs 的模块名走 **Babble-Boss-2.2** 翻译，而这两个 BOSS 的词条写在 `!Libs` 里、
-不在本仓库内。只装本仓库时，TMH 模块会显示英文名，甚至不满足启用条件。
+**不在本仓库内**。只装本仓库、却用了一份没有这两个词条的 `!Libs` 时，
+TMH 模块会显示英文名，甚至不满足启用条件（`enabletrigger` 用翻译后的名字精确匹配）。
 
-要让中文名生效，在
+**最简单：装配套的 [tian880212/Libs](https://github.com/tian880212/Libs)**，里面已经带好这两条。
+
+如果你已经在用自己那份 `!Libs`、不想整套更换，就在
 
 ```
 Interface\AddOns\!Libs\Babble\Babble-Boss-2.2\Babble-Boss-2.2.lua
