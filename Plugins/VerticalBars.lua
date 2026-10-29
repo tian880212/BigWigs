@@ -46,6 +46,10 @@ L:RegisterTranslations("enUS", function()
 		["Right"] = true,
 		["Left"] = true,
 		["Label side is now %s"] = true,
+		["Cast banner"] = true,
+		["Show a short banner at the top of the track when a skill's cast bar is skipped."] = true,
+		["Cast banner enabled"] = true,
+		["Cast banner disabled"] = true,
 	}
 end)
 
@@ -85,6 +89,10 @@ L:RegisterTranslations("zhCN", function()
 		["Right"] = "右侧",
 		["Left"] = "左侧",
 		["Label side is now %s"] = "名称方向已切换为：%s",
+		["Cast banner"] = "施法横幅",
+		["Show a short banner at the top of the track when a skill's cast bar is skipped."] = "读条条被竖行条跳过时，在轨道顶部显示一条短暂的施法横幅.",
+		["Cast banner enabled"] = "施法横幅已开启",
+		["Cast banner disabled"] = "施法横幅已关闭",
 	}
 end)
 
@@ -102,6 +110,7 @@ BigWigsVerticalBars.defaultDB = {
 	scale = 1.0,
 	showLabels = true,
 	labelSide = "right",   -- "right" / "left"：技能名称显示在图标的哪一侧
+	showBanner = true,     -- 读条条被跳过时在顶部弹的施法横幅
 	locked = false,
 	bgVisible = true,
 	posx = nil,
@@ -233,6 +242,18 @@ BigWigsVerticalBars.consoleOptions = {
 				BigWigsVerticalBars:ResetAnchor()
 			end,
 		},
+		banner = {
+			type = "toggle",
+			name = L["Cast banner"],
+			desc = L["Show a short banner at the top of the track when a skill's cast bar is skipped."],
+			order = 9,
+			get = function()
+				return BigWigsVerticalBars.db.profile.showBanner
+			end,
+			set = function(v)
+				BigWigsVerticalBars.db.profile.showBanner = v
+			end,
+		},
 	},
 }
 
@@ -244,6 +265,9 @@ local timeline = {}      -- { {text, icon, key, start, dur, endTime} }
 local iconPool = {}      -- created icon frames
 local testRunning = false
 local testBars = nil
+local bannerText = nil   -- 当前施法横幅文字（nil = 无横幅）
+local bannerEndTime = 0
+local bannerDur = 0
 
 local FONT = "Fonts\\FRIZQT__.ttf"
 local WHITE = "Interface\\Tooltips\\UI-Tooltip-Background"
@@ -284,6 +308,23 @@ local function AddTimelineBar(text, timer, icon, key, module)
 	if type(timer) ~= "number" or timer <= 0 then
 		return
 	end
+	-- 读条条不占位：时长 <= 2 秒、且同模块同图标已经有条时，视为同一技能的"正在施放"读条条，直接跳过。
+	-- 典型场景（BWL 三龙 WingBuffet）：RemoveBar(冷却) → Bar(正在施放龙翼打击！,1) → DelayedBar(1,冷却,29)。
+	-- 冷却条此时只剩 ~1 秒、被 BigWigs_StopBar 的 keepShort 保住，读条条再进来就会跟它同图标同位置重叠，
+	-- 还会多占一格 maxIcons 名额、把后面的图标槽位整体挤后一位。
+	-- 读条条本身没有倒计时参考价值（"正在施放"由 Message 喊话和读条音效承担），让位更干净。
+	if timer <= 2 and icon and module then
+		for i = 1, table.getn(timeline) do
+			local entry = timeline[i]
+			if entry.module == module and entry.icon == icon then
+				-- 让位之后信息不能丢：转到锚点顶部的施法横幅（1 秒，不占图标位）
+				if BigWigsVerticalBars then
+					BigWigsVerticalBars:ShowBanner(text, timer)
+				end
+				return
+			end
+		end
+	end
 	local now = GetTime()
 	key = key or text
 	-- 注意: 同 key 重复开条一律视为"重置/刷新"（与横向条 CandyBar 重开即重置的行为一致）。
@@ -314,10 +355,24 @@ local function AddTimelineBar(text, timer, icon, key, module)
 	SortTimeline()
 end
 
-local function RemoveTimelineBarByKey(key)
+-- keepShort: 剩余 <= 2 秒的残条不删，让它自然下落到期。
+-- 原因：多数 boss 模块在「开始施放」时先 RemoveBar(旧冷却条) 再开读条条
+--（如 BWL 三龙 WingBuffet：RemoveBar("龙翼打击冷却") → Bar("正在施放龙翼打击！",1)
+-- → DelayedBar(1, "龙翼打击冷却", 29)）。此时旧冷却条通常只剩 1~3 秒（1s 读条 + 29s CD = 30s 循环），
+-- 一刀切掉会让竖行条瞬间失去该条；若场上只有这一条，timeline 变空 → 整个锚点隐藏，
+-- 表现就是「剩几秒时竖行条突然消失，1 秒后才重新冒出来」。
+-- 保留残条后：它自然走到底，同一时刻 DelayedBar 开出的同 key 新条会原地刷新它，无缝衔接。
+local function RemoveTimelineBarByKey(key, keepShort)
+	local now = GetTime()
 	for i = table.getn(timeline), 1, -1 do
-		if timeline[i].key == key then
-			table.remove(timeline, i)
+		local entry = timeline[i]
+		if entry.key == key then
+			local remain = entry.endTime - now
+			if keepShort and remain <= 2 and remain > 0 then
+				-- 残条：保留，交给过期清理 / 同 key 刷新
+			else
+				table.remove(timeline, i)
+			end
 		end
 	end
 end
@@ -338,6 +393,69 @@ end
 local function WipeTimeline()
 	for i = table.getn(timeline), 1, -1 do
 		table.remove(timeline, i)
+	end
+end
+
+------------------------------
+-- Cast banner
+-- 被 AddTimelineBar 跳过的读条条（<=2 秒且同图标已有条）不占图标位，
+-- 改成在锚点顶端弹一条 1 秒的细横幅，把「正在施放」这个信息补回来。
+-- 横幅是 anchor 的子 frame，挂在锚点 TOPLEFT 上方，不参与 ApplyLayout 的
+-- 高度/背景/热区计算，也不进 timeline，所以不会影响图标排版与推挤。
+------------------------------
+
+function BigWigsVerticalBars:ShowBanner(text, dur)
+	if not text or type(dur) ~= "number" or dur <= 0 then
+		return
+	end
+	local db = self.db.profile
+	-- 老存档没有这个键（nil），按「开」处理；只有显式关掉才不弹
+	if db.showBanner == false then
+		return
+	end
+	local b = self.frames and self.frames.banner
+	if not b then
+		return
+	end
+	bannerText = text
+	bannerDur = dur
+	bannerEndTime = GetTime() + dur
+	b.text:SetText(text)
+	-- 宽度按文字自适应（1.12 的 FontString 有 GetStringWidth），
+	-- 110 是下限，避免「火花」这种短名称横幅窄得像个色块
+	local w = b.text:GetStringWidth() + 26
+	if w < 110 then
+		w = 110
+	end
+	b:SetWidth(w)
+	b:SetAlpha(1)
+	b:Show()
+	self:RefreshShownState()
+end
+
+function BigWigsVerticalBars:UpdateBanner(now)
+	local b = self.frames and self.frames.banner
+	if not b or not bannerText then
+		return
+	end
+	local remain = bannerEndTime - now
+	if remain <= 0 then
+		bannerText = nil
+		b:Hide()
+		return
+	end
+	-- 前 70% 满亮，最后 30%（上限 0.5 秒）线性淡出，读条结束瞬间不硬切
+	local fade = bannerDur * 0.3
+	if fade > 0.5 then
+		fade = 0.5
+	end
+	if fade < 0.05 then
+		fade = 0.05
+	end
+	if remain < fade then
+		b:SetAlpha(remain / fade)
+	else
+		b:SetAlpha(1)
 	end
 end
 
@@ -548,8 +666,12 @@ function BigWigsVerticalBars:UpdateAllIcons()
 
 		if remain <= 5 then
 			-- 1.12 没有 SetRotation，用透明度脉冲模拟特效圈闪烁
-			iconFrame.autocastAnim:SetWidth(iconSize * 1.7)
-			iconFrame.autocastAnim:SetHeight(iconSize * 1.7)
+			-- 尺寸除以 curScale：图标本体在 5s 内被放大到 1.3 倍，特效圈如果也跟着乘，
+			-- 实际显示会是 1.7×1.3 ≈ 2.2 倍，多个条同时进 5 秒区时圈会互相盖住相邻图标。
+			-- 这里归一成恒定的 1.7 倍图标尺寸，只保留闪烁做紧迫感。
+			local ringSize = iconSize * 1.7 / curScale
+			iconFrame.autocastAnim:SetWidth(ringSize)
+			iconFrame.autocastAnim:SetHeight(ringSize)
 			iconFrame.autocastAnim:Show()
 			local pulse = 0.55 + 0.45 * math.abs(math.sin(now * 4))
 			iconFrame.autocastAnim:SetAlpha(pulse)
@@ -566,13 +688,35 @@ function BigWigsVerticalBars:UpdateAllIcons()
 
 	local count = 0
 
-	-- 下落区（下半段）：位置严格对应剩余时间，10s 在轨道中点，0 在轨道底
+	-- 下落区（下半段）：位置对应剩余时间，10s 在轨道中点，0 在轨道底。
+	-- 但默认轨道 300px 里 10s→0 只摊开约 134px，等于每秒仅 13.4px，而图标直径 32px
+	--（5s 内放大到 1.3 倍 = 41.6px）：两个技能相差 2.4s（放大态 3.1s）以内必然叠在一起。
+	-- 因此这里和等待区一样做最小间距推挤——拥挤时宁可让「位置=时间」的线性略微偏移，
+	-- 也不让两个图标互相压住；条少时会自动回到纯线性下落，观感不变。
+	local prevY, prevScale = nil, 1
 	for i = 1, table.getn(falling) do
 		local data = falling[i]
 		local remain = data.endTime - now
 		count = count + 1
-		local y = trackTopY + TimeToY(remain, trackH, iconSize)
 		local curScale = (remain <= 5) and 1.3 or 1
+		local y = trackTopY + TimeToY(remain, trackH, iconSize)
+		if prevY then
+			-- 间距取相邻两条中较大的那个尺寸（放大态占位更宽）
+			local gap
+			if curScale > prevScale then
+				gap = iconSize * curScale + 2
+			else
+				gap = iconSize * prevScale + 2
+			end
+			if y < prevY + gap then
+				y = prevY + gap
+			end
+		end
+		-- 兜底：条多到队列被推到 10s 刻度以上时压在轨道顶，不越界去盖等待区
+		if y > trackTopY then
+			y = trackTopY
+		end
+		prevY, prevScale = y, curScale
 		DrawIcon(count, data, y, curScale)
 	end
 
@@ -621,6 +765,9 @@ function BigWigsVerticalBars:UpdateAllIcons()
 			iconPool[i]:Hide()
 		end
 	end
+
+	-- 施法横幅计时/淡出（跟着锚点 OnUpdate 走，锚点隐藏时横幅自然也不显示）
+	self:UpdateBanner(now)
 
 	-- 全部条到期后自动隐藏锚点（EasyDBM 行为）
 	self:RefreshShownState()
@@ -692,6 +839,12 @@ function BigWigsVerticalBars:ApplyLayout()
 		anchor.sepLine:SetPoint("CENTER", anchor, "TOPLEFT", x + iconSize / 2, -longZoneH)
 	end
 
+	-- 施法横幅跟随轨道横向位置（名称换边时 trackX 会变）
+	if self.frames.banner then
+		self.frames.banner:ClearAllPoints()
+		self.frames.banner:SetPoint("BOTTOM", anchor, "TOPLEFT", x + iconSize / 2, 8)
+	end
+
 	-- 重建图标池（尺寸/名称方向变化）：旧框先隐藏再丢弃，
 	-- 否则它们仍挂在锚点下且保持 Show 状态，会留下换边前的幽灵图标与旧方向文字
 	for i in pairs(iconPool) do
@@ -760,13 +913,16 @@ function BigWigsVerticalBars:ResetAnchor()
 end
 
 -- 按需显示：竖行条启用且轨道上有进行中的计时条时才显示锚点，
--- 没有任何条时整体隐藏（与 EasyDBM 一致，进团队不会空轨道挂着）
+-- 没有任何条时整体隐藏（与 EasyDBM 一致，进团队不会空轨道挂着）。
+-- 例外：施法横幅还在的这 1 秒里也要保持显示，否则「读条条让位给横幅」时
+-- 若场上只剩这一条，锚点会连横幅一起藏掉，等于什么都看不到。
 function BigWigsVerticalBars:RefreshShownState()
 	local db = self.db.profile
 	if not self.frames.anchor then
 		return
 	end
-	if db.enabled and table.getn(timeline) > 0 then
+	local hasBanner = bannerText and (bannerEndTime > GetTime())
+	if db.enabled and (table.getn(timeline) > 0 or hasBanner) then
 		self.frames.anchor:Show()
 	else
 		self.frames.anchor:Hide()
@@ -885,11 +1041,39 @@ function BigWigsVerticalBars:SetupFrames()
 		end
 	end)
 
+	-- 施法横幅：被跳过的读条条改在这里显示（1 秒后淡出）
+	-- 挂成 anchor 的子 frame，锚点隐藏时自动跟着隐藏；位置在锚点 TOPLEFT 上方 8px，
+	-- 水平对齐轨道中心。不参与下面任何高度计算。
+	local banner = CreateFrame("Frame", nil, anchor)
+	banner:SetFrameStrata("MEDIUM")
+	banner:SetHeight(22)
+	banner:SetWidth(110)
+	banner:SetPoint("BOTTOM", anchor, "TOPLEFT", x + iconSize / 2, 8)
+	banner:SetBackdrop({
+		bgFile = WHITE,
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		edgeSize = 8,
+	})
+	banner:SetBackdropColor(0.1, 0.1, 0.1, 0.82)
+	banner:SetBackdropBorderColor(0.55, 0.42, 0.15, 0.9)
+	banner.accent = banner:CreateTexture(nil, "ARTWORK")
+	banner.accent:SetTexture(WHITE)
+	banner.accent:SetVertexColor(0.94, 0.62, 0.15, 1)
+	banner.accent:SetWidth(3)
+	banner.accent:SetHeight(22)
+	banner.accent:SetPoint("LEFT", banner, "LEFT", 0, 0)
+	banner.text = banner:CreateFontString(nil, "OVERLAY")
+	banner.text:SetFont(FONT, 12, "OUTLINE")
+	banner.text:SetPoint("CENTER", banner, "CENTER", 2, 0)
+	banner.text:SetTextColor(1, 0.85, 0.3, 1)
+	banner:Hide()
+
 	self.frames.anchor = anchor
 	anchor.lockBtn = lockBtn
 	anchor.pathBG = pathBG
 	anchor.trackHit = trackHit
 	anchor.sepLine = sepLine
+	self.frames.banner = banner
 
 	if not db.bgVisible then
 		pathBG:SetAlpha(0.05)
@@ -982,7 +1166,9 @@ function BigWigsVerticalBars:BigWigs_StopBar(module, text)
 	if not text then
 		return
 	end
-	RemoveTimelineBarByKey(text)
+	-- keepShort = true：不掐断只剩 1~2 秒的条（见 RemoveTimelineBarByKey 注释），
+	-- 避免「冷却条剩几秒 → 模块开读条条前先删冷却条 → 竖行条瞬隐再重冒」
+	RemoveTimelineBarByKey(text, true)
 	self:RefreshShownState()
 end
 
@@ -1013,6 +1199,17 @@ SlashCmdList["BIGWIGSVERTICAL"] = function(msg)
 		BigWigsVerticalBars:UpdateAllIcons()
 		BigWigs:Print(string.format(L["Label side is now %s"],
 			(msg == "left") and L["Left"] or L["Right"]))
+		return
+	end
+	-- /bwv banner：快速开关顶部施法横幅（等同选项里的「施法横幅」）
+	if msg == "banner" then
+		local bdb = BigWigsVerticalBars.db.profile
+		bdb.showBanner = not bdb.showBanner
+		if bdb.showBanner then
+			BigWigs:Print(L["Cast banner enabled"])
+		else
+			BigWigs:Print(L["Cast banner disabled"])
+		end
 		return
 	end
 	local db = BigWigsVerticalBars.db.profile
