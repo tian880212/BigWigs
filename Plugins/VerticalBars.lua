@@ -304,29 +304,8 @@ local function SortTimeline()
 	end)
 end
 
-------------------------------
--- Debug（/bwv debug）
--- 记录每次开条/停条，并捕获「残条被 keepShort 保留后没等到同 key 新条」的孤儿情况。
--- 用于定位「某个技能条第二次不再出现」这类问题：先确认是"条根本没进来"还是"进来没画出来"。
-------------------------------
-local debugLog, debugSeq, debugOn = {}, 0, false
-local pendingKeep = {}   -- key -> 残条被保留的时刻；同 key 新条到来时清除
-
-local function Dbg(s)
-	if not debugOn then
-		return
-	end
-	debugSeq = debugSeq + 1
-	debugLog[debugSeq] = string.format("%.1f  %s", GetTime(), s)
-	while debugSeq > 60 do
-		table.remove(debugLog, 1)
-		debugSeq = debugSeq - 1
-	end
-end
-
 local function AddTimelineBar(text, timer, icon, key, module)
 	if type(timer) ~= "number" or timer <= 0 then
-		Dbg("丢弃 " .. tostring(text) .. " time=" .. tostring(timer))
 		return
 	end
 	-- 读条条不占位：时长 <= 2 秒、且同模块同图标已经有条时，视为同一技能的"正在施放"读条条，直接跳过。
@@ -339,7 +318,6 @@ local function AddTimelineBar(text, timer, icon, key, module)
 			local entry = timeline[i]
 			if entry.module == module and entry.icon == icon then
 				-- 让位之后信息不能丢：转到锚点顶部的施法横幅（1 秒，不占图标位）
-				Dbg("让位成横幅 " .. tostring(text) .. " " .. tostring(timer) .. "s")
 				if BigWigsVerticalBars then
 					BigWigsVerticalBars:ShowBanner(text, timer)
 				end
@@ -355,8 +333,6 @@ local function AddTimelineBar(text, timer, icon, key, module)
 	-- 同 key：视为重启/刷新，原地更新结束时间（也保证不会产生重复条目）
 	for _, entry in ipairs(timeline) do
 		if entry.key == key then
-			pendingKeep[key] = nil
-			Dbg("开条(刷新) " .. tostring(text) .. " " .. tostring(timer) .. "s")
 			entry.start = now
 			entry.dur = timer
 			entry.endTime = now + timer
@@ -367,8 +343,6 @@ local function AddTimelineBar(text, timer, icon, key, module)
 			return
 		end
 	end
-	pendingKeep[key] = nil
-	Dbg("开条(新增) " .. tostring(text) .. " " .. tostring(timer) .. "s")
 	table.insert(timeline, {
 		text = text,
 		icon = icon or DEFAULT_ICON,
@@ -396,10 +370,7 @@ local function RemoveTimelineBarByKey(key, keepShort)
 			local remain = entry.endTime - now
 			if keepShort and remain <= 2 and remain > 0 then
 				-- 残条：保留，交给过期清理 / 同 key 刷新
-				pendingKeep[key] = now
-				Dbg("停条(保留残条) " .. tostring(key) .. " 剩 " .. string.format("%.1f", remain) .. "s")
 			else
-				Dbg("停条(删除) " .. tostring(key) .. " 剩 " .. string.format("%.1f", remain) .. "s")
 				table.remove(timeline, i)
 			end
 		end
@@ -617,15 +588,6 @@ function BigWigsVerticalBars:UpdateAllIcons()
 	-- 图标与轨道背景/刻度线共用同一 x（ApplyLayout 里的 anchor.trackX），
 	-- 保证图标始终居中在轨道内
 	local x_track = self.frames.anchor.trackX or 25
-
-	-- 孤儿检测：被 keepShort 保留下来的残条，2.5 秒内没等到同 key 新条，
-	-- 说明模块那边「先删旧条 → 延迟 1 秒再开新条」的延迟触发没落地，这条就彻底没了。
-	for k, t in pairs(pendingKeep) do
-		if now - t > 2.5 then
-			Dbg("MISSING " .. tostring(k) .. " 残条保留后 2.5s 内无新条")
-			pendingKeep[k] = nil
-		end
-	end
 
 	-- 过期清理
 	for i = table.getn(timeline), 1, -1 do
@@ -1250,31 +1212,6 @@ SlashCmdList["BIGWIGSVERTICAL"] = function(msg)
 			BigWigs:Print(L["Cast banner enabled"])
 		else
 			BigWigs:Print(L["Cast banner disabled"])
-		end
-		return
-	end
-	-- /bwv debug：开关日志。关闭时先把攒下的日志打出来再清空。
-	-- 用途：某个技能条「第二次不再出现」时，先判断是条根本没进来（日志里没有对应开条记录）
-	-- 还是进来了没画出来（有开条记录但屏幕上没有），再对症下药。
-	if msg == "debug" then
-		if debugOn and debugSeq > 0 then
-			BigWigs:Print("--- 竖行条日志（" .. debugSeq .. " 条）---")
-			for i = 1, debugSeq do
-				BigWigs:Print(debugLog[i])
-			end
-		end
-		debugOn = not debugOn
-		for k in pairs(debugLog) do
-			debugLog[k] = nil
-		end
-		debugSeq = 0
-		for k in pairs(pendingKeep) do
-			pendingKeep[k] = nil
-		end
-		if debugOn then
-			BigWigs:Print("竖行条日志：开启。打一场后 /bwv debug 查看")
-		else
-			BigWigs:Print("竖行条日志：关闭")
 		end
 		return
 	end

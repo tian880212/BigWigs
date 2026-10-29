@@ -236,13 +236,9 @@ function module:WingBuffet()
 	self:CancelDelayedMessage(L["msg_wingBuffetSoon"])
 	self:RemoveBar(L["bar_wingBuffetCd"])
 	
-	-- 与暗影烈焰一致：冷却条用 Bar 直接开（原来靠 DelayedBar 延迟 1 秒再开，
-	-- 第二次施放时新条没能接上，冷却条彻底消失）。「读条 1 秒 + 冷却 29 秒」
-	-- 一次开成完整 30 秒冷却条，读条期间冷却已在倒数，总周期不变。
-	self:Bar(L["bar_wingBuffetCd"], timer.wingBuffetFirstCd, icon.wingBuffet, true, color.wingBuffetCd)
 	self:Bar(L["bar_wingBuffetCast"], timer.wingBuffetCast, icon.wingBuffet, true, color.wingBuffetCast)
 	
-	-- DelayedBar(1, 冷却, 29) 已移除：冷却条已在上面用 Bar 一次开出
+	self:DelayedBar(timer.wingBuffetCast, L["bar_wingBuffetCd"], timer.wingBuffetCd, icon.wingBuffet, true, color.wingBuffetCd)
 	self:DelayedMessage(timer.wingBuffetCast + timer.wingBuffetCd - 2, L["msg_wingBuffetSoon"], "Attention", false, nil, false)
 end
 
