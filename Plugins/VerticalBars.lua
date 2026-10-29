@@ -46,10 +46,6 @@ L:RegisterTranslations("enUS", function()
 		["Right"] = true,
 		["Left"] = true,
 		["Label side is now %s"] = true,
-		["Cast banner"] = true,
-		["Show a short banner at the top of the track when a skill's cast bar is skipped."] = true,
-		["Cast banner enabled"] = true,
-		["Cast banner disabled"] = true,
 	}
 end)
 
@@ -89,10 +85,6 @@ L:RegisterTranslations("zhCN", function()
 		["Right"] = "右侧",
 		["Left"] = "左侧",
 		["Label side is now %s"] = "名称方向已切换为：%s",
-		["Cast banner"] = "施法横幅",
-		["Show a short banner at the top of the track when a skill's cast bar is skipped."] = "读条条被竖行条跳过时，在轨道顶部显示一条短暂的施法横幅.",
-		["Cast banner enabled"] = "施法横幅已开启",
-		["Cast banner disabled"] = "施法横幅已关闭",
 	}
 end)
 
@@ -110,7 +102,6 @@ BigWigsVerticalBars.defaultDB = {
 	scale = 1.0,
 	showLabels = true,
 	labelSide = "right",   -- "right" / "left"：技能名称显示在图标的哪一侧
-	showBanner = true,     -- 读条条被跳过时在顶部弹的施法横幅
 	locked = false,
 	bgVisible = true,
 	posx = nil,
@@ -242,18 +233,6 @@ BigWigsVerticalBars.consoleOptions = {
 				BigWigsVerticalBars:ResetAnchor()
 			end,
 		},
-		banner = {
-			type = "toggle",
-			name = L["Cast banner"],
-			desc = L["Show a short banner at the top of the track when a skill's cast bar is skipped."],
-			order = 9,
-			get = function()
-				return BigWigsVerticalBars.db.profile.showBanner
-			end,
-			set = function(v)
-				BigWigsVerticalBars.db.profile.showBanner = v
-			end,
-		},
 	},
 }
 
@@ -265,9 +244,6 @@ local timeline = {}      -- { {text, icon, key, start, dur, endTime} }
 local iconPool = {}      -- created icon frames
 local testRunning = false
 local testBars = nil
-local bannerText = nil   -- 当前施法横幅文字（nil = 无横幅）
-local bannerEndTime = 0
-local bannerDur = 0
 
 local FONT = "Fonts\\FRIZQT__.ttf"
 local WHITE = "Interface\\Tooltips\\UI-Tooltip-Background"
@@ -307,23 +283,6 @@ end
 local function AddTimelineBar(text, timer, icon, key, module)
 	if type(timer) ~= "number" or timer <= 0 then
 		return
-	end
-	-- 读条条不占位：时长 <= 2 秒、且同模块同图标已经有条时，视为同一技能的"正在施放"读条条，直接跳过。
-	-- 典型场景（BWL 三龙 WingBuffet）：RemoveBar(冷却) → Bar(正在施放龙翼打击！,1) → DelayedBar(1,冷却,29)。
-	-- 冷却条此时只剩 ~1 秒、被 BigWigs_StopBar 的 keepShort 保住，读条条再进来就会跟它同图标同位置重叠，
-	-- 还会多占一格 maxIcons 名额、把后面的图标槽位整体挤后一位。
-	-- 读条条本身没有倒计时参考价值（"正在施放"由 Message 喊话和读条音效承担），让位更干净。
-	if timer <= 2 and icon and module then
-		for i = 1, table.getn(timeline) do
-			local entry = timeline[i]
-			if entry.module == module and entry.icon == icon then
-				-- 让位之后信息不能丢：转到锚点顶部的施法横幅（1 秒，不占图标位）
-				if BigWigsVerticalBars then
-					BigWigsVerticalBars:ShowBanner(text, timer)
-				end
-				return
-			end
-		end
 	end
 	local now = GetTime()
 	key = key or text
@@ -393,69 +352,6 @@ end
 local function WipeTimeline()
 	for i = table.getn(timeline), 1, -1 do
 		table.remove(timeline, i)
-	end
-end
-
-------------------------------
--- Cast banner
--- 被 AddTimelineBar 跳过的读条条（<=2 秒且同图标已有条）不占图标位，
--- 改成在锚点顶端弹一条 1 秒的细横幅，把「正在施放」这个信息补回来。
--- 横幅是 anchor 的子 frame，挂在锚点 TOPLEFT 上方，不参与 ApplyLayout 的
--- 高度/背景/热区计算，也不进 timeline，所以不会影响图标排版与推挤。
-------------------------------
-
-function BigWigsVerticalBars:ShowBanner(text, dur)
-	if not text or type(dur) ~= "number" or dur <= 0 then
-		return
-	end
-	local db = self.db.profile
-	-- 老存档没有这个键（nil），按「开」处理；只有显式关掉才不弹
-	if db.showBanner == false then
-		return
-	end
-	local b = self.frames and self.frames.banner
-	if not b then
-		return
-	end
-	bannerText = text
-	bannerDur = dur
-	bannerEndTime = GetTime() + dur
-	b.text:SetText(text)
-	-- 宽度按文字自适应（1.12 的 FontString 有 GetStringWidth），
-	-- 110 是下限，避免「火花」这种短名称横幅窄得像个色块
-	local w = b.text:GetStringWidth() + 26
-	if w < 110 then
-		w = 110
-	end
-	b:SetWidth(w)
-	b:SetAlpha(1)
-	b:Show()
-	self:RefreshShownState()
-end
-
-function BigWigsVerticalBars:UpdateBanner(now)
-	local b = self.frames and self.frames.banner
-	if not b or not bannerText then
-		return
-	end
-	local remain = bannerEndTime - now
-	if remain <= 0 then
-		bannerText = nil
-		b:Hide()
-		return
-	end
-	-- 前 70% 满亮，最后 30%（上限 0.5 秒）线性淡出，读条结束瞬间不硬切
-	local fade = bannerDur * 0.3
-	if fade > 0.5 then
-		fade = 0.5
-	end
-	if fade < 0.05 then
-		fade = 0.05
-	end
-	if remain < fade then
-		b:SetAlpha(remain / fade)
-	else
-		b:SetAlpha(1)
 	end
 end
 
@@ -769,9 +665,6 @@ function BigWigsVerticalBars:UpdateAllIcons()
 		end
 	end
 
-	-- 施法横幅计时/淡出（跟着锚点 OnUpdate 走，锚点隐藏时横幅自然也不显示）
-	self:UpdateBanner(now)
-
 	-- 全部条到期后自动隐藏锚点（EasyDBM 行为）
 	self:RefreshShownState()
 end
@@ -840,12 +733,6 @@ function BigWigsVerticalBars:ApplyLayout()
 		anchor.sepLine:SetWidth(iconSize)
 		anchor.sepLine:ClearAllPoints()
 		anchor.sepLine:SetPoint("CENTER", anchor, "TOPLEFT", x + iconSize / 2, -longZoneH)
-	end
-
-	-- 施法横幅跟随轨道横向位置（名称换边时 trackX 会变）
-	if self.frames.banner then
-		self.frames.banner:ClearAllPoints()
-		self.frames.banner:SetPoint("BOTTOM", anchor, "TOPLEFT", x + iconSize / 2, 8)
 	end
 
 	-- 重建图标池（尺寸/名称方向变化）：旧框先隐藏再丢弃，
@@ -917,15 +804,12 @@ end
 
 -- 按需显示：竖行条启用且轨道上有进行中的计时条时才显示锚点，
 -- 没有任何条时整体隐藏（与 EasyDBM 一致，进团队不会空轨道挂着）。
--- 例外：施法横幅还在的这 1 秒里也要保持显示，否则「读条条让位给横幅」时
--- 若场上只剩这一条，锚点会连横幅一起藏掉，等于什么都看不到。
 function BigWigsVerticalBars:RefreshShownState()
 	local db = self.db.profile
 	if not self.frames.anchor then
 		return
 	end
-	local hasBanner = bannerText and (bannerEndTime > GetTime())
-	if db.enabled and (table.getn(timeline) > 0 or hasBanner) then
+	if db.enabled and table.getn(timeline) > 0 then
 		self.frames.anchor:Show()
 	else
 		self.frames.anchor:Hide()
@@ -1044,39 +928,11 @@ function BigWigsVerticalBars:SetupFrames()
 		end
 	end)
 
-	-- 施法横幅：被跳过的读条条改在这里显示（1 秒后淡出）
-	-- 挂成 anchor 的子 frame，锚点隐藏时自动跟着隐藏；位置在锚点 TOPLEFT 上方 8px，
-	-- 水平对齐轨道中心。不参与下面任何高度计算。
-	local banner = CreateFrame("Frame", nil, anchor)
-	banner:SetFrameStrata("MEDIUM")
-	banner:SetHeight(22)
-	banner:SetWidth(110)
-	banner:SetPoint("BOTTOM", anchor, "TOPLEFT", x + iconSize / 2, 8)
-	banner:SetBackdrop({
-		bgFile = WHITE,
-		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-		edgeSize = 8,
-	})
-	banner:SetBackdropColor(0.1, 0.1, 0.1, 0.82)
-	banner:SetBackdropBorderColor(0.55, 0.42, 0.15, 0.9)
-	banner.accent = banner:CreateTexture(nil, "ARTWORK")
-	banner.accent:SetTexture(WHITE)
-	banner.accent:SetVertexColor(0.94, 0.62, 0.15, 1)
-	banner.accent:SetWidth(3)
-	banner.accent:SetHeight(22)
-	banner.accent:SetPoint("LEFT", banner, "LEFT", 0, 0)
-	banner.text = banner:CreateFontString(nil, "OVERLAY")
-	banner.text:SetFont(FONT, 12, "OUTLINE")
-	banner.text:SetPoint("CENTER", banner, "CENTER", 2, 0)
-	banner.text:SetTextColor(1, 0.85, 0.3, 1)
-	banner:Hide()
-
 	self.frames.anchor = anchor
 	anchor.lockBtn = lockBtn
 	anchor.pathBG = pathBG
 	anchor.trackHit = trackHit
 	anchor.sepLine = sepLine
-	self.frames.banner = banner
 
 	if not db.bgVisible then
 		pathBG:SetAlpha(0.05)
@@ -1202,17 +1058,6 @@ SlashCmdList["BIGWIGSVERTICAL"] = function(msg)
 		BigWigsVerticalBars:UpdateAllIcons()
 		BigWigs:Print(string.format(L["Label side is now %s"],
 			(msg == "left") and L["Left"] or L["Right"]))
-		return
-	end
-	-- /bwv banner：快速开关顶部施法横幅（等同选项里的「施法横幅」）
-	if msg == "banner" then
-		local bdb = BigWigsVerticalBars.db.profile
-		bdb.showBanner = not bdb.showBanner
-		if bdb.showBanner then
-			BigWigs:Print(L["Cast banner enabled"])
-		else
-			BigWigs:Print(L["Cast banner disabled"])
-		end
 		return
 	end
 	local db = BigWigsVerticalBars.db.profile
