@@ -35,6 +35,10 @@ L:RegisterTranslations("enUS", function()
 		["Bar unlocked, can be dragged"] = true,
 		["Background shown"] = true,
 		["Background hidden (right-click the track to show again)"] = true,
+		["Show background"] = true,
+		["Show or hide the semi-transparent background behind the vertical track."] = true,
+		["Background enabled"] = true,
+		["Background disabled"] = true,
 		["Click to unlock, you can drag the bar"] = true,
 		["Click to lock, forbid dragging"] = true,
 		["Lock position"] = true,
@@ -74,6 +78,10 @@ L:RegisterTranslations("zhCN", function()
 		["Bar unlocked, can be dragged"] = "已解锁，可拖动竖行条",
 		["Background shown"] = "背景已显示",
 		["Background hidden (right-click the track to show again)"] = "背景已隐藏（右键轨道再次显示）",
+		["Show background"] = "显示背景",
+		["Show or hide the semi-transparent background behind the vertical track."] = "显示或隐藏竖直轨道背后的半透明底色.",
+		["Background enabled"] = "已开启竖行条背景",
+		["Background disabled"] = "已关闭竖行条背景",
 		["Click to unlock, you can drag the bar"] = "点击解锁，可拖动竖行条",
 		["Click to lock, forbid dragging"] = "点击锁定，禁止拖动",
 		["Lock position"] = "锁定位置",
@@ -222,6 +230,19 @@ BigWigsVerticalBars.consoleOptions = {
 			set = function(v)
 				BigWigsVerticalBars.db.profile.locked = v
 				BigWigsVerticalBars:UpdateLockState()
+			end,
+		},
+		bgVisible = {
+			type = "toggle",
+			name = L["Show background"],
+			desc = L["Show or hide the semi-transparent background behind the vertical track."],
+			order = 9,
+			get = function()
+				return BigWigsVerticalBars.db.profile.bgVisible
+			end,
+			set = function(v)
+				BigWigsVerticalBars.db.profile.bgVisible = v
+				BigWigsVerticalBars:ApplyBackgroundVisibility()
 			end,
 		},
 		reset = {
@@ -769,6 +790,19 @@ function BigWigsVerticalBars:UpdateLockState()
 	end
 end
 
+-- 背景显隐：选项里的「显示背景」开关与右键轨道共用同一条路径，
+-- 避免两处各自改 alpha 造成状态不一致（右键改了 db、选项 get 已经变了但没人刷新显示）
+function BigWigsVerticalBars:ApplyBackgroundVisibility()
+	if not self.frames or not self.frames.anchor then
+		return
+	end
+	local pathBG = self.frames.anchor.pathBG
+	if not pathBG then
+		return
+	end
+	pathBG:SetAlpha(self.db.profile.bgVisible and 1 or 0.05)
+end
+
 function BigWigsVerticalBars:SavePosition()
 	if not self.frames.anchor then
 		return
@@ -919,7 +953,7 @@ function BigWigsVerticalBars:SetupFrames()
 		if arg1 == "RightButton" then
 			local db = BigWigsVerticalBars.db.profile
 			db.bgVisible = not db.bgVisible
-			pathBG:SetAlpha(db.bgVisible and 1 or 0.05)
+			BigWigsVerticalBars:ApplyBackgroundVisibility()
 			if db.bgVisible then
 				BigWigs:Print(L["Background shown"])
 			else
@@ -934,12 +968,9 @@ function BigWigsVerticalBars:SetupFrames()
 	anchor.trackHit = trackHit
 	anchor.sepLine = sepLine
 
-	if not db.bgVisible then
-		pathBG:SetAlpha(0.05)
-	end
-
 	self:ApplyLayout()
 	self:UpdateLockState()
+	self:ApplyBackgroundVisibility()
 	self:RestorePosition()
 
 	anchor:SetScript("OnUpdate", function()
@@ -1049,6 +1080,18 @@ SlashCmdList["BIGWIGSVERTICAL"] = function(msg)
 	msg = string.lower(msg or "")
 	if msg == "test" then
 		BigWigsVerticalBars:RunTest()
+		return
+	end
+	-- /bwv bg | /bwv background：快速开关轨道背景（等同选项里的「显示背景」）
+	if msg == "bg" or msg == "background" then
+		local db = BigWigsVerticalBars.db.profile
+		db.bgVisible = not db.bgVisible
+		BigWigsVerticalBars:ApplyBackgroundVisibility()
+		if db.bgVisible then
+			BigWigs:Print(L["Background enabled"])
+		else
+			BigWigs:Print(L["Background disabled"])
+		end
 		return
 	end
 	-- /bwv left | /bwv right：快速切换技能名称方向（等同选项里的「名称方向」）
