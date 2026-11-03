@@ -84,23 +84,23 @@ L:RegisterTranslations("zhCN", function() return {
     sparksyou_name = "火花盯人警报",
     sparksyou_desc = "暗影烈焰火花攻击你或对你施法时，用音效和警告图标提醒",
 
-    trigger_wingBuffet = "埃博诺克开始施放龙翼打击。",
+    trigger_wingBuffet = "埃博诺克开始施放龙翼打击",
     bar_wingBuffetCast = "正在施放龙翼打击！",
     bar_wingBuffetCd = "龙翼打击冷却",
     msg_wingBuffetCast = "正在施放龙翼打击！",
     msg_wingBuffetSoon = "2秒后龙翼打击 - 现在嘲讽！",
 
     -- 修复：原 trigger_shadowFlame 改为 trigger_shadowFlameCast
-    trigger_shadowFlameCast = "埃博诺克开始施放暗影烈焰。",
+    trigger_shadowFlameCast = "埃博诺克开始施放暗影烈焰",
     bar_shadowFlameCast = "正在施放暗影烈焰！",
     bar_shadowFlameCd = "暗影烈焰冷却",
     msg_shadowFlameCast = "正在施放暗影烈焰！",
     -- 新增缺失的 trigger_shadowFlameHit
     trigger_shadowFlameHit = "埃博诺克的暗影烈焰击中",
 
-    trigger_shadowOfEbonrocYou = "你受到了埃博诺克之影效果的影响。",
-    trigger_shadowOfEbonrocOther = "(.+)受到了埃博诺克之影效果的影响。",
-    trigger_shadowOfEbonrocFade = "埃博诺克之影效果从(.+)身上消失了。",
+    trigger_shadowOfEbonrocYou = "你受到了埃博诺克之影效果的影响",
+    trigger_shadowOfEbonrocOther = "(.+)受到了埃博诺克之影效果的影响",
+    trigger_shadowOfEbonrocFade = "埃博诺克之影效果从(.+)身上消失了",
     msg_shadowOfEbonroc = " 受到了埃博诺克之影 - 嘲讽！",
     bar_shadowOfEbonrocDur = " 埃博诺克之影",
     bar_shadowOfEbonrocCd = "埃博诺克之影冷却",
@@ -266,7 +266,7 @@ function module:Event(msg)
 	elseif string.find(msg, L["trigger_shadowFlameHit"]) then
 		self:Sync(syncName.shadowFlameHit)
 	
-	elseif msg == L["trigger_shadowOfEbonrocYou"] then
+	elseif string.find(msg, L["trigger_shadowOfEbonrocYou"]) then
 		self:Sync(syncName.shadowOfEbonroc .. " " .. UnitName("Player"))
 	
 	elseif string.find(msg, L["trigger_shadowOfEbonrocOther"]) then
