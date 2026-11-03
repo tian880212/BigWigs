@@ -475,6 +475,17 @@ local FALL_AT = 10     -- 10s 以下为精确下落段（下半段）
 local QUEUE_GAP = 6    -- 等待堆叠最小间距
 local LABEL_W = 150    -- 名称文字区预留宽度（决定锚点总宽）
 
+-- 不进竖行条的「占位条」文本特征（lua pattern，统一小写后匹配）。
+-- 这类条不是真实倒计时，只是"事件期间挂一条、点一下就能选中某个 NPC"的点击锚点，
+-- 典型：AQ20 拉贾克斯的 self:Bar("Target Andorov", 3600, icon.eventStart, true, "Cyan")
+-- 时长填 3600 表示"整个事件期间一直挂着"。放进竖行条会占住长冷却区整整一小时，
+-- 让 timeline 永不空 → 锚点永不隐藏（表现：一进安其拉废墟竖行条就挂在屏幕上不消失）；
+-- 而且竖行条图标点击的行为是"播报剩余秒数"，本来也承担不了"点击选中"的职责。
+-- 横条不受影响，原版的点击选中功能照常。
+local PLACEHOLDER_BAR_PATTERNS = {
+	"^target ",   -- "Target Andorov" 之类
+}
+
 -- 剩余时间 → 图标中心相对锚点顶部的 y 偏移（向下为负）
 -- 上半段 40s→10s 占 trackH/2，下半段 10s→0 占 trackH/2
 local function TimeToY(remain, trackH, iconSize)
@@ -1046,6 +1057,13 @@ function BigWigsVerticalBars:BigWigs_StartBar(module, text, time, icon, otherc, 
 	end
 	if not text or type(time) ~= "number" or time <= 0 then
 		return
+	end
+	-- 点击占位条不进竖行条（见 PLACEHOLDER_BAR_PATTERNS 注释），横条照常
+	local lowerText = string.lower(text)
+	for i = 1, table.getn(PLACEHOLDER_BAR_PATTERNS) do
+		if string.find(lowerText, PLACEHOLDER_BAR_PATTERNS[i]) then
+			return
+		end
 	end
 	AddTimelineBar(text, time, icon, text, module)
 	-- 锚点隐藏时 OnUpdate 不跑，新条进来要主动唤起显示
