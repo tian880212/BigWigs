@@ -205,15 +205,19 @@ end
 
 
 function module:Event(msg)
-	if msg == L["trigger_wingBuffet"] then
+	-- 中文客户端的「开始施放 / 获得了 / 效果消失」消息结尾都带全角句号，
+	-- 而上面的词条里没写句号，用 == 精确比较会永远不成立 —— Flamegor 之前
+	-- 三个技能全都收不到提示就是这个原因（同一份代码里 Ebonroc 的词条带了
+	-- 句号，所以它正常）。统一改成子串匹配，句号有无都能命中。
+	if string.find(msg, L["trigger_wingBuffet"]) then
 		self:Sync(syncName.wingBuffet)
 	
-	elseif msg == L["trigger_shadowFlame"] then
+	elseif string.find(msg, L["trigger_shadowFlame"]) then
 		self:Sync(syncName.shadowFlame)
 	
-	elseif msg == L["trigger_frenzy"] then
+	elseif string.find(msg, L["trigger_frenzy"]) then
 		self:Sync(syncName.frenzy)
-	elseif msg == L["trigger_frenzyFade"] then
+	elseif string.find(msg, L["trigger_frenzyFade"]) then
 		self:Sync(syncName.frenzyFade)
 	end
 end

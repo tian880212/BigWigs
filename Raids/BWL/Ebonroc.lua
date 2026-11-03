@@ -257,10 +257,10 @@ end
 function module:Event(msg)
 	if not msg then return end
 
-	if msg == L["trigger_wingBuffet"] then
+	if string.find(msg, L["trigger_wingBuffet"]) then
 		self:Sync(syncName.wingBuffet)
 	
-	elseif msg == L["trigger_shadowFlameCast"] then
+	elseif string.find(msg, L["trigger_shadowFlameCast"]) then
 		self:Sync(syncName.shadowFlameCast)
 	
 	elseif string.find(msg, L["trigger_shadowFlameHit"]) then
