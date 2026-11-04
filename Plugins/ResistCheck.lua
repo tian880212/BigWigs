@@ -178,6 +178,15 @@ BigWigsResistCheck.consoleOptions = {
     BigWigsResistCheck:QueryResistance(6)
    end,
   },
+  close = {
+   type = "execute",
+   name = L["Close window"],
+   desc = L["Closes the resistance query window."],
+   order = 9,
+   func = function()
+    BigWigsResistCheck:CloseWindow()
+   end,
+  },
   spacer = {
    type = "header",
    name = " ",
@@ -205,6 +214,7 @@ BigWigsResistCheck.consoleOptions = {
 
 function BigWigsResistCheck:OnEnable()
  self.queryRunning = nil
+ self.windowClosed = nil
  self.responseTable = {}
  self.missingResponsesList = {}
  self.currentResistanceType = 0
@@ -221,7 +231,14 @@ end
 --      Event Handlers      --
 ------------------------------
 
-function BigWigsResistCheck:UpdateTablet()
+function BigWigsResistCheck:UpdateTablet(forceShow)
+ if forceShow then
+  self.windowClosed = nil
+ end
+ -- 用户主动关闭后，后续的刷新/查询回包不允许再把面板弹回来
+ if self.windowClosed then
+  return
+ end
  if not tablet:IsRegistered("BigWigs_ResistCheck") then
   tablet:Register("BigWigs_ResistCheck",
     "children", function()
@@ -233,6 +250,14 @@ function BigWigsResistCheck:UpdateTablet()
     "showHintWhenDetached", true,
     "cantAttach", true,
     "menu", function()
+     dewdrop:AddLine(
+       "text", L["Close window"],
+       "tooltipTitle", L["Close window"],
+       "tooltipText", L["Closes the resistance query window."],
+       "func", function()
+        self:CloseWindow()
+       end)
+     dewdrop:AddLine()
      for index, resistType in pairs(RESISTANCE_TYPES) do
       local resistIndex = index -- Create a local copy of the index for each iteration
       dewdrop:AddLine(
@@ -243,20 +268,13 @@ function BigWigsResistCheck:UpdateTablet()
          self:QueryResistance(resistIndex) -- Use the local copy
         end)
      end
+     dewdrop:AddLine()
      dewdrop:AddLine(
        "text", L["Notify low resistance"],
        "tooltipTitle", L["Notify low resistance"],
        "tooltipText", L["List people with resistance below threshold to raid chat."],
        "func", function()
         self:NotifyLowResistance()
-       end)
-     dewdrop:AddLine(
-       "text", L["Close window"],
-       "tooltipTitle", L["Close window"],
-       "tooltipText", L["Closes the resistance query window."],
-       "func", function()
-        tablet:Attach("BigWigs_ResistCheck")
-        dewdrop:Close()
        end)
     end
   )
@@ -266,6 +284,18 @@ function BigWigsResistCheck:UpdateTablet()
  else
   tablet:Refresh("BigWigs_ResistCheck")
  end
+end
+
+-- 真正关闭面板：复位 detached 状态 + 关闭/隐藏 frame，并记住"用户已关闭"
+function BigWigsResistCheck:CloseWindow()
+ self.windowClosed = true
+ if not tablet:IsRegistered("BigWigs_ResistCheck") then
+  return
+ end
+ if not tablet:IsAttached("BigWigs_ResistCheck") then
+  tablet:Attach("BigWigs_ResistCheck")
+ end
+ tablet:Close("BigWigs_ResistCheck")
 end
 
 function BigWigsResistCheck:OnTooltipUpdate()
@@ -377,7 +407,7 @@ end
 
 function BigWigsResistCheck:QueryResistanceAndShowWindow(resistType)
  self:QueryResistance(resistType)
- self:UpdateTablet()
+ self:UpdateTablet(true)
 end
 
 function BigWigsResistCheck:QueryResistance(resistType)
@@ -436,8 +466,8 @@ function BigWigsResistCheck:QueryResistance(resistType)
  -- Query the raid
  self:TriggerEvent("BigWigs_SendSync", "BWRQ " .. resistType)
 
- -- Update the display
- self:UpdateTablet()
+ -- Update the display (重新发起查询时强制展开面板)
+ self:UpdateTablet(true)
 end
 
 function BigWigsResistCheck:NotifyLowResistance()
