@@ -2,7 +2,7 @@ local module, L = BigWigs:ModuleDeclaration("Ebonroc", "Blackwing Lair")
 
 module.revision = 30146
 module.enabletrigger = module.translatedName
-module.toggleoptions = {"wingbuffet", "shadowflame", "curse", "sparks", "sparksyou", "bosskill"}
+module.toggleoptions = {"wingbuffet", "shadowflame", "curse", "sparks", "sparksyou", "sparkscall", "sparksmark", "bosskill"}
 
 L:RegisterTranslations("enUS", function() return {
 	cmd = "Ebonroc",
@@ -26,6 +26,17 @@ L:RegisterTranslations("enUS", function() return {
 	sparksyou_cmd = "sparksyou",
 	sparksyou_name = "Shadowflame Spark Aggro Alert",
 	sparksyou_desc = "Warn with sound alarm and warning icon when a Shadowflame Spark attacks or casts on YOU",
+
+	sparkscall_cmd = "sparkscall",
+	sparkscall_name = "Spark Target /say Call",
+	sparkscall_desc = "Automatically /say \"Spark on me!\" when a Shadowflame Spark is on you, so the raid knows who to run from",
+
+	sparksmark_cmd = "sparksmark",
+	sparksmark_name = "Spark Target Raid Mark",
+	sparksmark_desc = "Put a raid icon on players targeted by a Shadowflame Spark, restored after 15s (raid leader / assistant only, or when BigWigs.markUnitsWhenNotRaidLeader is on)",
+
+	say_sparksYou = "Spark on me!",
+	msg_sparksYouOther = "Spark on %s!",
 	
 	
 	trigger_wingBuffet = "Ebonroc begins to cast Wing Buffet.", --CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE
@@ -84,6 +95,17 @@ L:RegisterTranslations("zhCN", function() return {
     sparksyou_name = "火花盯人警报",
     sparksyou_desc = "暗影烈焰火花攻击你或对你施法时，用音效和警告图标提醒",
 
+    sparkscall_cmd = "sparkscall",
+    sparkscall_name = "火花盯人喊话",
+    sparkscall_desc = "被火花盯住时自动在 /说 频道喊「我被火花盯住了！」，让全团知道谁要跑开",
+
+    sparksmark_cmd = "sparksmark",
+    sparksmark_name = "火花盯人标记",
+    sparksmark_desc = "给被火花盯住的玩家上团队标记，15秒后恢复原标记（需团长/助理权限，或开启 BigWigs.markUnitsWhenNotRaidLeader）",
+
+    say_sparksYou = "我被火花盯住了！",
+    msg_sparksYouOther = "火花盯上了 %s！",
+
     trigger_wingBuffet = "埃博诺克开始施放龙翼打击",
     bar_wingBuffetCast = "正在施放龙翼打击！",
     bar_wingBuffetCd = "龙翼打击冷却",
@@ -106,7 +128,7 @@ L:RegisterTranslations("zhCN", function() return {
     bar_shadowOfEbonrocCd = "埃博诺克之影冷却",
 
     msg_sparks = "治疗者远离小火直接跑开，等到它们消失！",
-    trigger_sparkHit = "暗影烈焰火花",
+    trigger_sparkHit = "焰火花", -- 同时匹配「影焰火花」与本服旧译「暗影烈焰火花」
     bar_sparksCd = "火花",
     bar_sparksCdCount = "火花 (%d)",
     msg_sparksSoon = "2秒后出现火花",
@@ -131,6 +153,8 @@ local timer = {
 
 	sparksFirst = 16,
 	sparksCd = 8,
+	sparkCallCd = 10, -- 同一玩家再次喊话/标记的最小间隔
+	sparkMark = 15, -- 盯人标记保留时长
 }
 local icon = {
 	wingBuffet = "INV_Misc_MonsterScales_14",
@@ -157,6 +181,7 @@ local syncName = {
 	shadowOfEbonroc = "EbonrocShadow"..module.revision,
 	shadowOfEbonrocFade = "EbonrocShadowFade"..module.revision,
 	sparks = "EbonrocSparks"..module.revision,
+	sparksYou = "EbonrocSparkYou"..module.revision,
 }
 local spellId = {
 	shadowFlame = 22539,
@@ -166,13 +191,16 @@ local spellId = {
 function module:OnEnable()
 	--self:RegisterEvent("CHAT_MSG_SAY", "Event") --Debug
 	
-	self:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE", "Event") --trigger_shadowFlameHit, trigger_sparkHit
-	self:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_PARTY_DAMAGE", "Event") --trigger_shadowFlameHit, trigger_sparkHit
-	self:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE", "Event") --trigger_wingBuffet, trigger_shadowFlameCast, trigger_shadowFlameHit, trigger_sparkHit
+	self:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE", "SelfEvent") --trigger_shadowFlameHit, trigger_sparkHit
+	self:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_PARTY_DAMAGE", "Event") --trigger_shadowFlameHit
+	self:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE", "Event") --trigger_wingBuffet, trigger_shadowFlameCast, trigger_shadowFlameHit
 	
-	self:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS", "Event") --trigger_sparkHit
-	self:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_PARTY_HITS", "Event") --trigger_sparkHit
-	self:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_CREATURE_HITS", "Event") --trigger_sparkHit
+	-- 打中/没打中「本机玩家」的事件单独走 SelfEvent：AceEvent 回调签名不带事件名，
+	-- 若在通用 Event 里靠文本猜「击中你/攻击你/你受到」，一旦客户端换了写法（攻击 你、没有击中你、
+	-- 抵抗了…）就整段失效且静默无声。*_SELF_* 事件的目标必然是本人，判定 100% 可靠。
+	self:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS", "SelfEvent") --trigger_sparkHit
+	self:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_MISSES", "SelfEvent") --trigger_sparkHit (闪避/招架/格挡/未命中)
+	self:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_PARTY_HITS", "Event") --trigger_sparkHit（队友被火花打，只做提示）
 
 	self:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE", "Event") --trigger_shadowOfEbonrocYou
 	self:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_PARTY_DAMAGE", "Event") --trigger_shadowOfEbonrocOther
@@ -192,11 +220,15 @@ function module:OnEnable()
 	self:ThrottleSync(3, syncName.shadowOfEbonroc)
 	self:ThrottleSync(3, syncName.shadowOfEbonrocFade)
 	self:ThrottleSync(5, syncName.sparks)
+	self:ThrottleSync(3, syncName.sparksYou)
 end
 
 function module:OnSetup()
 	self.started = nil
 	self.sparksWaveCount = 0
+	self.sparkCallTime = {}
+	self.sparkOtherTime = {}
+	self.sparkMarks = {}
 end
 
 function module:OnDisengage()
@@ -211,6 +243,20 @@ function module:OnDisengage()
 	self:RemoveBar(L["bar_sparksCd"])
 	self:RemoveWarningSign(icon.sparks)
 	self.sparksWaveCount = 0
+
+	-- 收条时把盯人标记还原，避免标记残留到全场结束
+	if self.sparkMarks then
+		local players = {}
+		for player in pairs(self.sparkMarks) do
+			table.insert(players, player)
+		end
+		for i = 1, table.getn(players) do
+			self:CancelScheduledEvent("EbonrocSparkMark" .. players[i])
+			self:ClearSparkMark(players[i])
+		end
+	end
+	self.sparkCallTime = {}
+	self.sparkOtherTime = {}
 end
 
 function module:OnEngage()	
@@ -279,15 +325,23 @@ function module:Event(msg)
 		self:Sync(syncName.shadowOfEbonrocFade .. " " .. shadowOfEbonrocFadePlayer)
 
 	elseif string.find(msg, L["trigger_sparkHit"]) then
-		local warnYou = self.db.profile.sparksyou
-		if warnYou == nil then warnYou = self.db.profile.sparks end
-		-- 英文客户端 "hits you/crits you/you for"，中文客户端「击中你/对你造成/你受到」
-		local onYou = string.find(msg, " hits you") or string.find(msg, " crits you") or string.find(msg, " you for ") or string.find(msg, "attacks. You")
-			or string.find(msg, "击中你") or string.find(msg, "对你造成") or string.find(msg, L["you"] .. "受到")
-		if warnYou and onYou then
-			self:Message(L["msg_sparksYou"], "Personal", true, "Alarm")
-			self:WarningSign(icon.sparks, 2)
-		end
+		self:SparkOnOther(msg)
+	end
+end
+
+-- 只处理「打到本机玩家」的事件（CHAT_MSG_*_SELF_*）。
+-- 事件类型本身已经保证目标是自己，不再靠文本猜「你」，中文/英文客户端通吃。
+function module:SelfEvent(msg)
+	if not msg then return end
+
+	if string.find(msg, L["trigger_sparkHit"]) then
+		self:DebugMessage("SPARK SELF: " .. msg)
+		self:SparkOnYou(UnitName("player"))
+		return
+	end
+
+	if string.find(msg, L["trigger_shadowFlameHit"]) then
+		self:Sync(syncName.shadowFlameHit)
 	end
 end
 
@@ -299,14 +353,142 @@ function module:UNIT_CASTEVENT(caster,target,action,spell,castTime)
 		self:DelayedSync(castTime/1000, syncName.shadowFlameHit)
 		return
 	elseif spell == spellId.sparkSpell then
-		local _, playerGuid = UnitExists("player")
-		local warnYou = self.db.profile.sparksyou
-		if warnYou == nil then warnYou = self.db.profile.sparks end
-		if warnYou and target and (target == playerGuid or target == UnitName("player") or UnitIsUnit(target, "player")) then
-			self:Message(L["msg_sparksYou"], "Personal", true, "Alarm")
-			self:WarningSign(icon.sparks, 2)
+		-- 火花对我们读条/选目标 = 被盯上，直接走统一入口
+		local exists, playerGuid = UnitExists("player")
+		if target and ((playerGuid and target == playerGuid) or target == UnitName("player") or UnitIsUnit(target, "player")) then
+			self:SparkOnYou(UnitName("player"))
 		end
 		return
+	end
+end
+
+-- 被火花盯上的统一入口（本地检测与团队同步共用）
+-- noSync = true 表示这条是收到的同步，不能再往回同步，否则会无限循环
+function module:SparkOnYou(player, noSync)
+	if not player then return end
+	player = tostring(player)
+
+	local isMe = (player == UnitName("player"))
+	local warnYou = self.db.profile.sparksyou
+	if warnYou == nil then warnYou = self.db.profile.sparks end
+
+	-- 新选项在老 profile 里可能读到 nil（AceDB 补默认值并不可靠），这里显式兜底为开
+	local doCall = self.db.profile.sparkscall
+	if doCall == nil then doCall = true end
+	local doMark = self.db.profile.sparksmark
+	if doMark == nil then doMark = true end
+
+	-- 自身警告：每次被打都提示，保持原有「火花点你」行为
+	if isMe and warnYou then
+		self:Message(L["msg_sparksYou"], "Personal", true, "Alarm")
+		self:WarningSign(icon.sparks, 2)
+	end
+
+	-- 节流：火花会持续追着同一个人打，10 秒内只喊一次 / 标一次，避免刷屏
+	if not self.sparkCallTime then self.sparkCallTime = {} end
+	local now = GetTime()
+	if self.sparkCallTime[player] and (now - self.sparkCallTime[player]) < timer.sparkCallCd then
+		return
+	end
+	self.sparkCallTime[player] = now
+
+	if isMe then
+		-- 被盯的人自己喊话，全团都能看到是谁
+		if doCall then
+			SendChatMessage(L["say_sparksYou"], "SAY")
+		end
+		-- 同步出去，让有标记权限的团长/助理也能补标记
+		if not noSync then
+			self:Sync(syncName.sparksYou .. " " .. player)
+		end
+	else
+		self:NotifySparkOnOther(player)
+	end
+
+	if doMark then
+		self:MarkSparkPlayer(player)
+	end
+end
+
+-- 提醒「火花盯上了别人」——本地日志与收到的同步都走这里，共用一个节流表，避免重复刷屏
+function module:NotifySparkOnOther(player)
+	if not player or player == UnitName("player") then return end
+
+	if not self.sparkOtherTime then self.sparkOtherTime = {} end
+	local now = GetTime()
+	if self.sparkOtherTime[player] and (now - self.sparkOtherTime[player]) < 6 then
+		return
+	end
+	self.sparkOtherTime[player] = now
+
+	local warn = self.db.profile.sparksyou
+	if warn == nil then warn = self.db.profile.sparks end
+	if warn then
+		self:Message(string.format(L["msg_sparksYouOther"], player), "Important", false, nil, false)
+	end
+end
+
+-- 从「火花打了别人」的日志里抠出被打的人名；抠不出来就静默放弃，绝不乱标
+function module:SparkOnOther(msg)
+	local name
+	local _, _, n = string.find(msg, "击中%s*([^%s]+)%s*造成")
+	name = n
+	if not name then
+		_, _, name = string.find(msg, "击中%s*([^%s]+)")
+	end
+	if not name then
+		_, _, name = string.find(msg, "hits%s+([^%s]+)%s+for")
+	end
+	if not name then
+		_, _, name = string.find(msg, "crits%s+([^%s]+)%s+for")
+	end
+	if not name or name == "" then return end
+	-- 「你」必须归一成本机角色名，否则会把字面量「你」当成人名广播出去
+	if name == "你" or name == "You" or name == "you" then name = UnitName("player") end
+
+	self:NotifySparkOnOther(name)
+
+	-- 团长/助理在本机看到队友被盯也补一个标记：被盯的人没装本插件时也能标上
+	local doMark = self.db.profile.sparksmark
+	if doMark == nil then doMark = true end
+	if doMark then self:MarkSparkPlayer(name) end
+end
+
+-- 给被盯的人上团队标记，并记录原标记以便还原
+function module:MarkSparkPlayer(player)
+	if not (IsRaidLeader() or IsRaidOfficer()) and not BigWigs.markUnitsWhenNotRaidLeader then
+		return
+	end
+	if not self.sparkMarks then self.sparkMarks = {} end
+	if self.sparkMarks[player] then return end -- 已在标记中，等它自然到期
+
+	local unit
+	if player == UnitName("player") then
+		unit = "player"
+	else
+		for i = 1, GetNumRaidMembers() do
+			if UnitName("raid" .. i) == player then
+				unit = "raid" .. i
+				break
+			end
+		end
+	end
+	if not unit then return end
+
+	local mark = self:GetAvailableRaidMark()
+	if not mark then return end
+
+	self.sparkMarks[player] = { unit = unit, prev = GetRaidTargetIndex(unit) or 0 }
+	SetRaidTarget(unit, mark)
+	self:ScheduleEvent("EbonrocSparkMark" .. player, self.ClearSparkMark, timer.sparkMark, self, player)
+end
+
+function module:ClearSparkMark(player)
+	if not self.sparkMarks or not self.sparkMarks[player] then return end
+	local info = self.sparkMarks[player]
+	self.sparkMarks[player] = nil
+	if info.unit and GetRaidTargetIndex(info.unit) then
+		SetRaidTarget(info.unit, info.prev or 0)
 	end
 end
 
@@ -327,6 +509,8 @@ function module:BigWigs_RecvSync(sync, rest, nick)
 		self:ShadowOfEbonrocFade(rest)
 	elseif sync == syncName.sparks and self.db.profile.sparks then
 		self:SparksSpawn(rest)
+	elseif sync == syncName.sparksYou and rest then
+		self:SparkOnYou(rest, true)
 	end
 end
 

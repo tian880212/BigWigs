@@ -3,7 +3,7 @@ local module, L = BigWigs:ModuleDeclaration("吞噬者提里奥克", "Timbermaw 
 -- module variables
 module.revision = 30140
 module.enabletrigger = module.translatedName   -- 完整单位名，CheckForEngage 为精确匹配
-module.toggleoptions = { "flame", "flamecd", -1, "corrosion", "corrosionmark", -1, "icelance", "icelancemark", "bosskill" }
+module.toggleoptions = { "flame", "flamecd", -1, "corrosion", "corrosionmark", -1, "icelance", "icelancesay", "icelancemark", "bosskill" }
 module.zonename = {
 	AceLibrary("AceLocale-2.2"):new("BigWigs")["Timbermaw Hold"],
 	AceLibrary("Babble-Zone-2.2")["Timbermaw Hold"],
@@ -19,6 +19,7 @@ module.defaultDB = {
 	corrosion = true,
 	corrosionmark = true,
 	icelance = true,
+	icelancesay = true,
 	icelancemark = true,
 }
 
@@ -102,6 +103,10 @@ L:RegisterTranslations("enUS", function()
 		icelancemark_name = "Ice Lance marks",
 		icelancemark_desc = "Mark the players targeted by the Ice Lance.",
 
+		icelancesay_cmd = "icelancesay",
+		icelancesay_name = "Ice Lance say",
+		icelancesay_desc = "When the Ice Lance targets you, say in /say that you are moving in to share the damage.",
+
 		trigger_flameCast = "Trioch begins to attack with Flame Skull",
 		trigger_flameFrontSides = "Trioch is about to spew flames to the front and sides",
 		trigger_flameFrontBack = "Trioch is about to spew flames to the front and behind",
@@ -124,6 +129,7 @@ L:RegisterTranslations("enUS", function()
 
 		msg_iceLance = "%s and %s targeted by Ice Lance - GATHER to share damage!",
 		msg_iceLanceYou = "YOU are targeted by Ice Lance! Gather on the marked players!",
+		say_iceLance = "Ice Lance on me - gathering up, stack on me!",
 		bar_iceLance = "Ice Lance - Gather",
 	}
 end)
@@ -156,6 +162,10 @@ L:RegisterTranslations("zhCN", function()
 		icelancemark_name = "冰锥标记",
 		icelancemark_desc = "为被冰锥瞄准的玩家打团队标记。",
 
+		icelancesay_cmd = "icelancesay",
+		icelancesay_name = "冰锥自动喊话",
+		icelancesay_desc = "当你被冰锥瞄准时自动在/say喊话，告知正在就位集合分摊。",
+
 		trigger_flameCast = "提里奥克在用烈焰之颅攻击",
 		trigger_flameFrontSides = "提里奥克即将向前方和两侧喷射烈焰",
 		trigger_flameFrontBack = "提里奥克即将向前方和身后喷射烈焰",
@@ -176,8 +186,9 @@ L:RegisterTranslations("zhCN", function()
 		msg_oozeDead = "【蠕动的异质】已死亡！离开【毒害之云】毒池！",
 		bar_oozePoison = "毒害之云 - 快跑开！",
 
-		msg_iceLance = "冰锥：%s 和 %s 被瞄准 - 集合分担伤害！",
-		msg_iceLanceYou = "你被冰锥瞄准！到被标记者处集合分担！",
+		msg_iceLance = "冰锥：%s和%s被瞄准——集合分担伤害！",
+		msg_iceLanceYou = "你被冰锥瞄准——到被标记者处集合分担！",
+		say_iceLance = "冰锥点我——集合分摊，都靠过来！",
 		bar_iceLance = "冰锥 - 集合分担",
 	}
 end)
@@ -309,6 +320,7 @@ function module:OnDisengage()
 	self:CancelScheduledEvent("TriochOozeDead")
 	self:CancelScheduledEvent("TriochOozePoisonEnd")
 	self:CancelScheduledEvent("TriochIceEnd")
+	self:CancelDelayedSound("voiceGather", "TriochIce")
 	self:RemoveBar(L["bar_flameCast"])
 	self:RemoveBar(L["bar_flame"])
 	self:RemoveBar(L["bar_oozeSlime"])
@@ -471,10 +483,16 @@ end
 function module:IceLance(n1, n2)
 	if not self.db.profile.icelance then return end
 	local isYou = (n1 == UnitName("player")) or (n2 and n2 == UnitName("player"))
+	-- 「集合分摊」语音：点名瞬间一声，命中前（倒计时 2s 处）再催一声
 	self:Sound("voiceGather")
+	self:DelayedSound(2, "voiceGather", "TriochIce")
 
 	if isYou then
 		self:Message(L["msg_iceLanceYou"], "Personal", true, "Alarm")
+		-- 被瞄准者本人喊话：告诉大团自己就位、快点靠过来分摊
+		if self.db.profile.icelancesay then
+			SendChatMessage(L["say_iceLance"], "SAY")
+		end
 	else
 		self:Message(string.format(L["msg_iceLance"], n1 or "?", n2 or ""), "Important")
 	end
@@ -499,6 +517,7 @@ function module:IceLance(n1, n2)
 end
 
 function module:IceEnd()
+	self:CancelDelayedSound("voiceGather", "TriochIce")
 	if self.iceTargets then
 		for name, _ in pairs(self.iceTargets) do
 			self:RestorePreviousRaidTargetForPlayer(name)

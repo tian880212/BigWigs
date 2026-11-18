@@ -71,9 +71,9 @@ L:RegisterTranslations("enUS", function()
 
 		trigger_arrow = "aims a flaming bolt at (.+)!",
 		bar_arrow = "Arrow on %s",
-		msg_arrowSelf = "Stack with others!",
-		msg_arrowOther = "Stack on %s to soak the Arrow!",
-		say_arrow = "Arrow on Me!",
+		msg_arrowSelf = "Arrow on YOU - move to the boss or stack with the raid!",
+		msg_arrowOther = "Arrow on %s - close in on them to share the damage!",
+		say_arrow = "Arrow on me - moving to the boss, stack up!",
 
 		trigger_fear = "bellows a deep roar",
 		bar_fear = "Incoming Fear",
@@ -98,16 +98,16 @@ L:RegisterTranslations("zhCN", function()
 		volleyzone_desc = "当你站在AOE区域内时的个人警报（箭雨）",
 
 		arrow_cmd = "arrow",
-		arrow_name = "浸火之箭警报",
-		arrow_desc = "当你成为浸火之箭目标时的施法条和个人警报",
+		arrow_name = "火焰箭警报",
+		arrow_desc = "当你成为火焰箭目标时的计时条和个人警报",
 
 		arrowsay_cmd = "arrowsay",
-		arrowsay_name = "浸火之箭警报喊话",
-		arrowsay_desc = "当浸火之箭指向你时在/say频道喊话",
+		arrowsay_name = "火焰箭自动喊话",
+		arrowsay_desc = "当火焰箭指向你时自动在/say喊话，告知贴近Boss或集合分摊",
 
 		arrowmark_cmd = "arrowmark",
-		arrowmark_name = "浸火之箭标记",
-		arrowmark_desc = "用三角标记浸火之箭指向目标",
+		arrowmark_name = "火焰箭标记",
+		arrowmark_desc = "用三角标记火焰箭指向的目标",
 
 		fear_cmd = "fear",
 		fear_name = "恐惧咆哮计时条",
@@ -138,10 +138,10 @@ L:RegisterTranslations("zhCN", function()
 		trigger_volleyZoneFade = "箭雨效果从你身上消失了",
 
 		trigger_arrow = "腐嚎向(.+)射出一道火焰箭",
-		bar_arrow = "箭矢→%s",
-		msg_arrowSelf = "与其他玩家集合或者跑向Boss！",
-		msg_arrowOther = "集合到%s处分摊箭矢伤害！",
-		say_arrow = "浸火之箭点我！",
+		bar_arrow = "火焰箭→%s",
+		msg_arrowSelf = "火焰箭点你——贴近Boss或与大团集合分摊！",
+		msg_arrowOther = "火焰箭点%s——朝他靠拢一起分摊伤害！",
+		say_arrow = "火焰箭点我，我贴近Boss集合分摊！",
 
 		trigger_fear = "科迪亚克开始施放恐惧咆哮",
 		bar_fear = "恐惧即将到来",

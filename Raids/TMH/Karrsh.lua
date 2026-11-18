@@ -3,7 +3,7 @@ local module, L = BigWigs:ModuleDeclaration("Karrsh the Sentinel", "Timbermaw Ho
 
 module.revision = 30000
 module.enabletrigger = module.translatedName
-module.toggleoptions = {"roar", "seed", -1, "crush", "felstomp", "defenders", "phase", "bosskill"}
+module.toggleoptions = {"roar", "seed", "seedsay", -1, "crush", "felstomp", "defenders", "phase", "bosskill"}
 module.zonename = {
 	AceLibrary("AceLocale-2.2"):new("BigWigs")["Timbermaw Hold"],
 	AceLibrary("Babble-Zone-2.2")["Timbermaw Hold"],
@@ -19,6 +19,10 @@ L:RegisterTranslations("enUS", function() return {
 	seed_cmd = "seed",
 	seed_name = "Seed of Corruption Alert",
 	seed_desc = "Warn when someone is afflicted by Seed of Corruption and mark them",
+
+	seedsay_cmd = "seedsay",
+	seedsay_name = "Seed - say it out loud",
+	seedsay_desc = "When the Seed of Corruption is on you, say in /say that you are moving out and asking not to be dispelled",
 
 	crush_cmd = "crush",
 	crush_name = "Crushing Hammer alert",
@@ -62,8 +66,11 @@ L:RegisterTranslations("enUS", function() return {
 	bar_roar = "Furious Roar",
 	msg_roarSoon = "Threat drop incoming!",
 
-	msg_seedYou = "SEED ON YOU - GET AWAY FROM OTHERS!",
+	msg_seedYou = "SEED ON YOU - RUN OUT OF THE RAID NOW! Do not get dispelled!",
 	msg_seedBack = "Your Seed of Corruption is gone - you may return to the raid!",
+
+	msg_seedRaid = " has Seed of Corruption - DO NOT DISPEL, stay away!",
+	say_seedYou = "Seed of Corruption on me, moving out - DO NOT dispel!",
 } end )
 
 L:RegisterTranslations("zhCN", function() return {
@@ -76,6 +83,10 @@ L:RegisterTranslations("zhCN", function() return {
     seed_cmd = "seed",
     seed_name = "腐蚀之种警报",
     seed_desc = "当有人被施加腐蚀之种时发出警告并标记该玩家",
+
+    seedsay_cmd = "seedsay",
+    seedsay_name = "中种自动喊话",
+    seedsay_desc = "当你中了腐蚀之种时，自动在本地喊话（/说）告知正在跑出人群、不要驱散",
 
     crush_cmd = "crush",
     crush_name = "粉碎重锤警报",
@@ -119,8 +130,11 @@ L:RegisterTranslations("zhCN", function() return {
     bar_roar = "狂怒咆哮",
     msg_roarSoon = "仇恨大幅度下降！",
 
-    msg_seedYou = "你中了腐蚀之种-远离其他人！",
+    msg_seedYou = "你中了腐蚀之种——立刻跑出人群！不要被驱散！",
     msg_seedBack = "你的腐蚀之种已消失——可以回归大团位置！",
+
+    msg_seedRaid = " 中了腐蚀之种——不要驱散，远离他！",
+    say_seedYou = "我中了腐蚀之种，正在跑出人群，别驱散！",
 } end )
 
 
@@ -217,6 +231,9 @@ function module:Event(msg)
 	end
 	local _, _, target = string.find(msg, L["trigger_seedOther"])
 	if target then
+		-- 客户端把玩家名写成「你」时归一为本机名，避免广播字面量「你」给全团
+		target = string.gsub(target, "^%s+", "")
+		if target == "你" or target == "you" then target = UnitName("player") end
 		self:Sync(syncName.seedGain.." "..target)
 		return
 	end
@@ -228,6 +245,8 @@ function module:Event(msg)
 	end
 	local _, _, fadeTarget = string.find(msg, L["trigger_seedFadeOther"])
 	if fadeTarget then
+		fadeTarget = string.gsub(fadeTarget, "^%s+", "")
+		if fadeTarget == "你" or fadeTarget == "you" then fadeTarget = UnitName("player") end
 		self:Sync(syncName.seedFade.." "..fadeTarget)
 		return
 	end
@@ -292,8 +311,15 @@ function module:SeedGain(target)
 	self.seedTargets[target] = true
 
 	if target == UnitName("player") then
+		-- 本人：醒目跑位提示 + 自动喊话，让没装插件的近邻也知道别驱散
 		self:Message(L["msg_seedYou"], "Personal", true, "voiceOut")
 		self:WarningSign(icon.seed, 3, true)
+		if self.db.profile.seedsay then
+			SendChatMessage(L["say_seedYou"], "SAY")
+		end
+	else
+		-- 大团：点名 + 不要驱散（noRaidSay=false 时团长/助理会同步打团队警告）
+		self:Message(target..L["msg_seedRaid"], "Important", false, "Info")
 	end
 
 	local mark = self:GetAvailableRaidMark()
@@ -308,6 +334,7 @@ function module:SeedFade(target)
 	self:RestorePreviousRaidTargetForPlayer(target)
 	-- 归位提醒：腐蚀之种消掉后远离人群的人可以回大团了
 	if target == UnitName("player") then
-		self:Message(L["msg_seedBack"], "Positive", false, "Long")
+		-- 这是"你"视角的消息，不能进团队频道（noRaidSay=true）
+		self:Message(L["msg_seedBack"], "Positive", true, "Long")
 	end
 end
